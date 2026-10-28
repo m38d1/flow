@@ -153,6 +153,42 @@ expectEqual(store.load(), [:], "corrupt file loads empty usage")
 
 try? FileManager.default.removeItem(at: temporaryRoot)
 
+// MARK: - WidgetSnapshot
+
+let widgetRoot = FileManager.default.temporaryDirectory
+    .appendingPathComponent("flow-widget-tests-\(UUID().uuidString)", isDirectory: true)
+let widgetStore = WidgetSnapshotStore(fileURL: widgetRoot.appendingPathComponent("nested/widget.json"))
+
+expectTrue(widgetStore.load() == nil, "missing widget snapshot loads nil")
+
+let widgetSnapshot = WidgetSnapshot(
+    timestamp: 1_700_000_000,
+    down: 1_234_567,
+    up: 89_012,
+    today: UsageTotals(down: 4_000, up: 500),
+    month: UsageTotals(down: 9_000, up: 1_500),
+    label: "VPN",
+    isOnline: true
+)
+try widgetStore.save(widgetSnapshot)
+expectEqual(widgetStore.load(), widgetSnapshot, "widget snapshot survives save and load")
+
+try "not json at all".write(to: widgetStore.fileURL, atomically: true, encoding: .utf8)
+expectTrue(widgetStore.load() == nil, "corrupt widget snapshot loads nil")
+
+try? FileManager.default.removeItem(at: widgetRoot)
+
+expectTrue(
+    WidgetSnapshotStore.defaultURL.path.hasSuffix("/Library/Application Support/Flow/widget.json"),
+    "default widget snapshot sits in the real user support folder"
+)
+expectEqual(
+    WidgetSnapshotStore.defaultURL.path,
+    (String(cString: getpwuid(getuid()).pointee.pw_dir) as NSString)
+        .appendingPathComponent("Library/Application Support/Flow/widget.json"),
+    "default widget snapshot ignores the sandbox container home"
+)
+
 // MARK: - counterDelta
 
 expectEqual(counterDelta(current: 100, previous: 40), 60, "counter delta grows")

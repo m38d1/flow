@@ -171,3 +171,39 @@ struct UsageStore {
 func counterDelta(current: UInt64, previous: UInt64) -> UInt64 {
     current >= previous ? current - previous : 0
 }
+
+struct WidgetSnapshot: Codable, Equatable {
+    var timestamp: TimeInterval
+    var down: Double
+    var up: Double
+    var today: UsageTotals
+    var month: UsageTotals
+    var label: String
+    var isOnline: Bool
+}
+
+struct WidgetSnapshotStore {
+    let fileURL: URL
+
+    // Inside the sandboxed widget FileManager homes point at the container, so the
+    // real user folder comes from the password database instead.
+    static var defaultURL: URL {
+        let home = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
+        return URL(fileURLWithPath: home)
+            .appendingPathComponent("Library/Application Support/Flow/widget.json")
+    }
+
+    func load() -> WidgetSnapshot? {
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return try? JSONDecoder().decode(WidgetSnapshot.self, from: data)
+    }
+
+    func save(_ snapshot: WidgetSnapshot) throws {
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let data = try JSONEncoder().encode(snapshot)
+        try data.write(to: fileURL, options: .atomic)
+    }
+}

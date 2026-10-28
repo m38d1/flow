@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import ServiceManagement
+import WidgetKit
 
 struct TrafficPoint: Identifiable {
     let id = UUID()
@@ -34,18 +35,22 @@ final class FlowModel: ObservableObject {
 
     private let sampler = NetworkSampler()
     private let store: UsageStore
+    private let widgetStore: WidgetSnapshotStore
     private var usage = UsageAccumulator()
     private var calculators: [String: RateCalculator] = [:]
     private var lastPrimary: (name: String, down: UInt64, up: UInt64)?
     private var timer: DispatchSourceTimer?
     private var dirty = false
     private var lastSave = Date.distantPast
+    private var lastWidgetSave = Date.distantPast
+    private var lastWidgetReload = Date.distantPast
     private let activityToken: NSObjectProtocol
     private var observers: [NSObjectProtocol] = []
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         store = UsageStore(fileURL: support.appendingPathComponent("Flow/usage.json"))
+        widgetStore = WidgetSnapshotStore(fileURL: WidgetSnapshotStore.defaultURL)
         usage.restore(days: store.load())
         activityToken = ProcessInfo.processInfo.beginActivity(
             options: .background,
@@ -116,6 +121,7 @@ final class FlowModel: ObservableObject {
 
         refreshUsage(now: now)
         updateMenuBarTitle()
+        publishWidgetSnapshot(now: now, force: false)
 
         if dirty, now.timeIntervalSince(lastSave) > 5 {
             saveUsage()
@@ -127,11 +133,12 @@ final class FlowModel: ObservableObject {
         dirty = true
         saveUsage()
         refreshUsage(now: Date())
+        publishWidgetSnapshot(now: Date(), force: true)
     }
 
     func flush() {
-        guard dirty else { return }
-        saveUsage()
+        if dirty { saveUsage() }
+        publishWidgetSnapshot(now: Date(), force: true)
     }
 
     func refreshLoginItem() {
@@ -187,6 +194,30 @@ final class FlowModel: ObservableObject {
         let title = "↓\(padded(ByteFormat.compactRate(downRate))) ↑\(padded(ByteFormat.compactRate(upRate)))"
         if title != menuBarTitle {
             menuBarTitle = title
+        }
+    }
+
+    private func publishWidgetSnapshot(now: Date, force: Bool) {
+        guard force || now.timeIntervalSince(lastWidgetSave) >= 5 else { return }
+        let snapshot = WidgetSnapshot(
+            timestamp: now.timeIntervalSince1970,
+            down: downRate,
+            up: upRate,
+            today: today,
+            month: month,
+            label: primaryLabel,
+            isOnline: isOnline
+        )
+        do {
+            try widgetStore.save(snapshot)
+            lastWidgetSave = now
+        } catch {
+            NSLog("Flow: could not save widget snapshot: \(error.localizedDescription)")
+            return
+        }
+        if force || now.timeIntervalSince(lastWidgetReload) >= 60 {
+            WidgetCenter.shared.reloadAllTimelines()
+            lastWidgetReload = now
         }
     }
 
